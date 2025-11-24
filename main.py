@@ -1,0 +1,52 @@
+
+from uuid import UUID
+from core.auth import fastapi_users, auth_backend
+from fastapi import FastAPI
+from fastapi_users import FastAPIUsers
+from fastapi_users.authentication import CookieTransport, JWTStrategy, AuthenticationBackend
+from core.user_manager import get_user_manager
+from core.db import init_db
+from models import User, Pathway
+from models.user import google_oauth_client
+from schemas.user import UserRead, UserCreate, UserUpdate
+from routes import learning_paths, topics
+app = FastAPI()
+
+@app.on_event("startup")
+async def on_startup():
+    await init_db()
+
+
+app.include_router(fastapi_users.get_auth_router(auth_backend), prefix="/auth/jwt", tags=["auth"])
+app.include_router(fastapi_users.get_register_router(UserRead, UserCreate), prefix="/auth", tags=["auth"])
+app.include_router(fastapi_users.get_users_router(UserRead, UserUpdate), prefix="/users", tags=["users"])
+
+app.include_router(
+    fastapi_users.get_verify_router(UserRead),
+    prefix="/auth",
+    tags=["auth"],
+)
+
+# This adds the /forgot-password and /reset-password endpoints
+app.include_router(
+    fastapi_users.get_reset_password_router(),
+    prefix="/auth",
+    tags=["auth"],
+)
+
+app.include_router(
+    fastapi_users.get_oauth_router(
+        google_oauth_client,
+        auth_backend,
+        "SECRET",
+        is_verified_by_default=True,
+    ),
+    prefix="/auth/google",
+    tags=["auth"],
+)
+app.include_router(learning_paths.router)
+app.include_router(topics.router)
+@app.get("/")
+async def root():
+    return {"message": "Hello World"}
+
