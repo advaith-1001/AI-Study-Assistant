@@ -1,7 +1,11 @@
 import json
 import google.generativeai as genai
+from dotenv import load_dotenv
+import os
 
-genai.configure(api_key="AIzaSyBg626ccfGpU0U8iNE4QUD6D-GezWkxpHM")
+load_dotenv()
+
+genai.configure(api_key=os.getenv("API_KEY"))
 
 async def generate_structured_pathway(user_topics: list[str], pathway_name: str) -> dict:
     """

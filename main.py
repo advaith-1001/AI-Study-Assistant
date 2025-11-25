@@ -2,6 +2,7 @@
 from uuid import UUID
 from core.auth import fastapi_users, auth_backend
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi_users import FastAPIUsers
 from fastapi_users.authentication import CookieTransport, JWTStrategy, AuthenticationBackend
 from core.user_manager import get_user_manager
@@ -10,7 +11,18 @@ from models import User, Pathway
 from models.user import google_oauth_client
 from schemas.user import UserRead, UserCreate, UserUpdate
 from routes import learning_paths, topics
+
 app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5174", "http://127.0.0.1:5174", "http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
 
 @app.on_event("startup")
 async def on_startup():
@@ -46,7 +58,12 @@ app.include_router(
 )
 app.include_router(learning_paths.router)
 app.include_router(topics.router)
+
 @app.get("/")
 async def root():
     return {"message": "Hello World"}
+
+@app.options("/{full_path:path}")
+async def preflight_handler(full_path: str):
+    return {"status": "ok"}
 

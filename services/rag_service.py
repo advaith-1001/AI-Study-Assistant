@@ -20,6 +20,11 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
+from dotenv import load_dotenv
+import os
+
+
+load_dotenv()
 
 # Import your LLM, e.g., from langchain_openai or langchain_community.llms
 # from langchain_openai import ChatOpenAI
@@ -32,20 +37,11 @@ embedding_function = SentenceTransformerEmbeddings(
     model_name="all-MiniLM-L6-v2"
 )
 
-# genai.configure(api_key="AIzaSyBg626ccfGpU0U8iNE4QUD6D-GezWkxpHM")
 
 model = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",  # or "gemini-1.5-pro" depending on your access
-    google_api_key="AIzaSyBg626ccfGpU0U8iNE4QUD6D-GezWkxpHM"
+    google_api_key=os.getenv("API_KEY")
 )
-
-# model = genai.GenerativeModel(
-#     "gemini-2.5-flash",
-#     # 2. Set the generation config to output JSON
-#     generation_config=genai.GenerationConfig(
-#         response_mime_type="application/json"
-#     )
-# )
 
 
 # --- Background Task for Embedding ---
