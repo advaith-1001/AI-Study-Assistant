@@ -171,18 +171,6 @@ npm run build
 - JWT stored in HttpOnly cookies
 - All protected endpoints require `User = Depends(fastapi_users.current_user())`
 
-## Key Differences from Backend to Frontend
-
-### Login/Register Credentials
-- **Email field**: Sent as `username` in login request (fastapi-users requirement)
-- **Username**: Required for registration
-- **Password**: Standard password field
-
-### Data Types
-- Backend uses UUIDs for pathway IDs
-- Backend uses integers for topic IDs
-- Frontend properly handles both types
-
 ## Features Breakdown
 
 ### 1. Registration & Login
@@ -267,22 +255,6 @@ npm run dev
 6. **View Topics**: Click on topics to see details
 7. **Generate Summary**: Use RAG to get AI summaries
 8. **Take Quiz**: Test your knowledge with AI quizzes
-
-## Important Notes
-
-### Backend Auth Changes
-All hardcoded user IDs have been replaced with authenticated user extraction:
-
-**Before:**
-```python
-user_id: UUID = UUID("123e4567-e89b-12d3-a456-426614174000")
-```
-
-**After:**
-```python
-user: User = Depends(fastapi_users.current_user())
-# Use user.id in operations
-```
 
 ### Frontend Cookie Handling
 - JWT is stored in localStorage for simplicity
