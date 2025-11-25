@@ -30,7 +30,7 @@ class SummaryResponse(BaseModel):
 async def get_topic_summary(
         topic_id: int,
         db: AsyncSession = Depends(get_session),
-        user_id: UUID = UUID("123e4567-e89b-12d3-a456-426614174000"),
+        user: User = Depends(fastapi_users.current_user()),
 ):
     """
     Generates a RAG summary for a specific topic.
@@ -51,7 +51,7 @@ async def get_topic_summary(
     if not topic:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Topic not found.")
 
-    if topic.pathway.user_id != user_id:
+    if topic.pathway.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized.")
 
     # 3. Check if embeddings are ready
@@ -66,12 +66,11 @@ async def get_topic_summary(
 
     return SummaryResponse(topic_id=topic_id, summary=summary)
 
-# You can also add an endpoint to mark a topic as complete here
-# e.g., POST /topics/{topic_id}/complete
+# Endpoint to mark a topic as complete
 
-@router.post("{topic_id}/complete")
+@router.post("/{topic_id}/complete")
 async def mark_topic_complete(topic_id: int, db: AsyncSession = Depends(get_session),
-                              user_id: UUID = UUID("123e4567-e89b-12d3-a456-426614174000")):
+                              user: User = Depends(fastapi_users.current_user())):
     query = (
         select(Topic)
         .options(selectinload(Topic.pathway))
@@ -87,7 +86,7 @@ async def mark_topic_complete(topic_id: int, db: AsyncSession = Depends(get_sess
             detail="Topic not found."
         )
 
-    if topic.pathway.user_id != user_id:
+    if topic.pathway.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to update this topic."
@@ -116,7 +115,7 @@ async def mark_topic_complete(topic_id: int, db: AsyncSession = Depends(get_sess
 async def get_current_topic(
         pathway_id: uuid.UUID,  # Match the type from your /status route
         db: AsyncSession = Depends(get_session),
-        user_id: UUID = UUID("123e4567-e89b-12d3-a456-426614174000"),  # Use your real auth
+        user: User = Depends(fastapi_users.current_user()),
 ):
     """
     Retrieves the next topic in the pathway that is marked as 'PENDING',
@@ -130,7 +129,7 @@ async def get_current_topic(
     # This single query is efficient and handles authorization.
     query = (
         select(Pathway)
-        .where(Pathway.id == pathway_id, Pathway.user_id == user_id)
+        .where(Pathway.id == pathway_id, Pathway.user_id == user.id)
         .options(selectinload(Pathway.topics))
     )
     result = await db.execute(query)

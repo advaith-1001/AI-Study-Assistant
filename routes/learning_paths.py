@@ -23,13 +23,28 @@ from services.quiz_service import generate_quiz
 from schemas.quiz_request import QuizRequest
 router = APIRouter(prefix="/pathways", tags=["Pathways"])
 
+@router.get("/", response_model=List[PathwayResponse])
+async def get_user_pathways(
+    user: User = Depends(fastapi_users.current_user()),
+    db: AsyncSession = Depends(get_session),
+):
+    """Get all pathways for the authenticated user"""
+    query = (
+        select(Pathway)
+        .where(Pathway.user_id == user.id)
+        .options(selectinload(Pathway.topics))
+    )
+    result = await db.execute(query)
+    pathways = result.scalars().all()
+    return pathways
+
 @router.post("/", response_model=PathwayResponse)
 async def create_pathway(
     data: PathwayCreate,
-    user_id: UUID = UUID("123e4567-e89b-12d3-a456-426614174000"),  # replace with Depends(get_current_user)
+    user: User = Depends(fastapi_users.current_user()),
     db: AsyncSession = Depends(get_session),
 ):
-    pathway = await save_pathway_to_db(data, user_id, db)
+    pathway = await save_pathway_to_db(data, user.id, db)
     return pathway
 
 # 2️⃣ LLM-Generated Pathway
@@ -37,7 +52,7 @@ async def create_pathway(
 async def generate_and_save_pathway(
     user_topics: list[str],
     pathway_name: str,
-    user_id: UUID = UUID("123e4567-e89b-12d3-a456-426614174000"),  # replace with Depends(get_current_user)
+    user: User = Depends(fastapi_users.current_user()),
     db: AsyncSession = Depends(get_session),
 ):
     try:
@@ -46,7 +61,7 @@ async def generate_and_save_pathway(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"LLM Error or invalid response: {e}")
 
-    pathway = await save_pathway_to_db(pathway_schema, user_id, db)
+    pathway = await save_pathway_to_db(pathway_schema, user.id, db)
     return pathway
 
 
@@ -58,7 +73,7 @@ async def generate_and_save_pathway(
 async def get_pathway_status(
         pathway_id: uuid.UUID,
         db: AsyncSession = Depends(get_session),
-        user_id: UUID = UUID("123e4567-e89b-12d3-a456-426614174000"),  # <-- Use correct auth
+        user: User = Depends(fastapi_users.current_user()),
 ):
     """
     Retrieves completion statistics for a user's specific learning pathway.
@@ -67,7 +82,7 @@ async def get_pathway_status(
     # 1. Query the database
     query = (
         select(Pathway)
-        .where(Pathway.id == pathway_id, Pathway.user_id == user_id)  # <-- Use user.id
+        .where(Pathway.id == pathway_id, Pathway.user_id == user.id)  # <-- Use user.id
         .options(selectinload(Pathway.topics))
     )
     result = await db.execute(query)
@@ -121,7 +136,7 @@ async def upload_pdfs_for_pathway(
         background_tasks: BackgroundTasks,
         files: List[UploadFile] = File(...),
         db: AsyncSession = Depends(get_session),
-        user_id: UUID = UUID("123e4567-e89b-12d3-a456-426614174000"),
+        user: User = Depends(fastapi_users.current_user()),
 ):
     """
     Uploads up to 4 PDFs for a specific pathway.
@@ -135,7 +150,7 @@ async def upload_pdfs_for_pathway(
         )
 
     # 2. Get pathway and verify ownership (like in your get_status endpoint)
-    query = select(Pathway).where(Pathway.id == pathway_id, Pathway.user_id == user_id)
+    query = select(Pathway).where(Pathway.id == pathway_id, Pathway.user_id == user.id)
     result = await db.execute(query)
     pathway = result.scalar_one_or_none()
 
@@ -178,7 +193,8 @@ async def quiz_generate(data: QuizRequest, db: AsyncSession = Depends(get_sessio
     result = await db.execute(query)
     topic = result.scalar_one_or_none()
 
-    quiz = await generate_quiz(topic, data.difficulty, data.num_questions, retriever)
+
+    quiz = await generate_quiz(topic, data.difficulty, data.num_questions)
     return quiz
 
 

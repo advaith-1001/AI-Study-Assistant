@@ -1,0 +1,83 @@
+## Quick Start - AI Study Assistant MVP
+
+### Backend Start
+
+```bash
+# Terminal 1
+cd AIStudyAssistant
+uvicorn main:app --reload
+```
+
+Backend runs on: `http://localhost:8000`
+API Docs: `http://localhost:8000/docs`
+
+### Frontend Start
+
+```bash
+# Terminal 2
+cd AIStudyAssistant/frontend
+npm install
+npm run dev
+```
+
+Frontend runs on: `http://localhost:3000`
+
+### First Login
+
+1. Go to http://localhost:3000
+2. Click Register
+3. Enter:
+   - Username: `testuser`
+   - Email: `test@example.com`
+   - Password: `password123`
+4. Click Register (auto-login)
+
+### Create Pathway
+
+1. Click "Create New Pathway"
+2. Name: `Python Learning`
+3. Topics (one per line):
+   ```
+   Python Basics
+   Functions
+   OOP
+   Advanced Python
+   ```
+4. Click "Create Pathway"
+5. Upload PDFs (optional) or skip
+
+### Use the App
+
+- **Dashboard**: View all pathways
+- **Pathway Detail**: See progress and topics
+- **Topic Detail**: 
+  - Generate summary (needs PDFs uploaded)
+  - Mark as completed
+  - Take quiz
+- **Quiz**: Answer questions and get feedback
+
+### Database (Optional Setup)
+
+If PostgreSQL is needed:
+
+```bash
+# Create database
+createdb ai_study_assistant_db
+
+# Run migrations
+alembic upgrade head
+```
+
+### Environment Setup
+
+Create `.env` in root if using PDFs and LLM:
+
+```
+GOOGLE_API_KEY=your_key_here
+DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/ai_study_assistant_db
+SECRET_KEY=super_secret_key
+```
+
+---
+
+**That's it!** The MVP is fully functional.
