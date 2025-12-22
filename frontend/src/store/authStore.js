@@ -1,23 +1,22 @@
 import { create } from 'zustand';
 
 const useAuthStore = create((set) => ({
-  user: JSON.parse(localStorage.getItem('user') || 'null'),
-  isAuthenticated: !!localStorage.getItem('access_token'),
-  loading: false,
-  error: null,
+  user: null, // Always start null
+  isAuthenticated: false,
+  isInitialCheckDone: false, 
+  
+  setUser: (user) => set({ 
+    user, 
+    isAuthenticated: !!user, 
+    isInitialCheckDone: true 
+  }),
 
-  setUser: (user) => set({ user, isAuthenticated: !!user }),
-
-  setLoading: (loading) => set({ loading }),
-
-  setError: (error) => set({ error }),
-
-  clearError: () => set({ error: null }),
+  setInitialCheckDone: (val) => set({ isInitialCheckDone: val }),
 
   logout: () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('user');
-    set({ user: null, isAuthenticated: false });
+    // Note: If using HttpOnly cookies, the backend must clear the cookie.
+    // Frontend just clears the local state.
+    set({ user: null, isAuthenticated: false, isInitialCheckDone: true });
   },
 }));
 

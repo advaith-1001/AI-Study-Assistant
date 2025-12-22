@@ -1,7 +1,7 @@
 
 from uuid import UUID
 from core.auth import fastapi_users, auth_backend
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_users import FastAPIUsers
 from fastapi_users.authentication import CookieTransport, JWTStrategy, AuthenticationBackend
@@ -11,6 +11,7 @@ from models import User, Pathway
 from models.user import google_oauth_client
 from schemas.user import UserRead, UserCreate, UserUpdate
 from routes import learning_paths, topics
+from fastapi.responses import FileResponse
 
 app = FastAPI()
 
@@ -50,12 +51,17 @@ app.include_router(
     fastapi_users.get_oauth_router(
         google_oauth_client,
         auth_backend,
-        "SECRET",
+        "SUPER_SECRET_KEY",
         is_verified_by_default=True,
+        redirect_url="http://localhost:5173/auth/callback"
     ),
     prefix="/auth/google",
     tags=["auth"],
 )
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(status_code=204)
 app.include_router(learning_paths.router)
 app.include_router(topics.router)
 

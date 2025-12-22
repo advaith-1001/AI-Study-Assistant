@@ -20,6 +20,9 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.prompts import MessagesPlaceholder
+from schemas.chat_request import ChatMessage
 from dotenv import load_dotenv
 import os
 
@@ -137,16 +140,41 @@ async def generate_summary_for_topic(topic: Topic) -> str:
 
     # 4. Define the RAG prompt
     prompt_template = """
-    You are a helpful study assistant. Generate a concise summary for the
-    learning topic: "{topic_name}".
+    You are a study assistant. Produce a detailed, structured summary for the topic: "{topic_name}".
 
-    Use ONLY the following context provided from the user's documents.
-    Do not use any outside knowledge.
+    Write ONLY from the provided context. Do not use outside knowledge. If information is missing, state that explicitly.
+
+    Requirements:
+    - Length: 600–900 words.
+    - Structure: Use clear headings and subsections.
+    - Depth: Explain concepts, mechanisms, and relationships; include examples from the context.
+    - Precision: Quote or reference specific lines/sections from the context when supporting claims.
+    - Clarity: Avoid generic filler; prioritize technical accuracy and concrete details.
 
     Context:
     {context}
 
-    Summary:
+    Output format:
+    # {topic_name}: in-depth summary based on provided context
+
+    ## Overview
+    - Key idea and scope from the context.
+
+    ## Core concepts and mechanisms
+    - Definitions and how they connect.
+    - Processes/algorithms/workflows described.
+
+    ## Examples and evidence from the context
+    - Concrete examples or cases (quote short snippets where relevant).
+
+    ## Nuances, limitations, and edge cases
+    - Ambiguities, trade-offs, or assumptions mentioned.
+
+    ## Practical implications or applications
+    - How to use or apply the ideas as stated in the context.
+
+    ## Quick recap
+    - 5–7 bullet points capturing the most important takeaways from the context.
     """
     prompt = ChatPromptTemplate.from_template(prompt_template)
 
@@ -172,3 +200,83 @@ async def generate_summary_for_topic(topic: Topic) -> str:
     # 6. Run the chain
     summary = await rag_chain.ainvoke(search_query)  # Use ainovke for async
     return summary
+
+
+# services/rag_service.py
+
+async def chat_with_pathway_pdfs(pathway_id: uuid.UUID, user_query: str, chat_history: List[ChatMessage] = []) -> str:
+    collection_name = f"pathway_{pathway_id}"
+
+    # 1. Load Vector Store
+    vector_store = Chroma(
+        collection_name=collection_name,
+        persist_directory=CHROMA_DB_DIR,
+        embedding_function=embedding_function
+    )
+    retriever = vector_store.as_retriever(search_kwargs={"k": 5})
+
+    # 2. Convert Pydantic history to LangChain message objects
+    # We only take the last 5-6 messages to stay within token limits
+    langchain_history = []
+    for msg in chat_history[-6:]:
+        if msg.role == "user":
+            langchain_history.append(HumanMessage(content=msg.content))
+        else:
+            langchain_history.append(AIMessage(content=msg.content))
+
+    # 3. Contextualize Question (The Re-phrasing Step)
+    contextualize_q_system_prompt = """Given a chat history and the latest user question \
+    which might reference context in the chat history, formulate a standalone question \
+    which can be understood without the chat history. Do NOT answer the question, \
+    just reformulate it if needed and otherwise return it as is."""
+
+    contextualize_q_prompt = ChatPromptTemplate.from_messages([
+        ("system", contextualize_q_system_prompt),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ])
+
+    # This sub-chain creates a search term that makes sense for the PDF
+    history_aware_retriever = (
+            contextualize_q_prompt
+            | model
+            | StrOutputParser()
+            | retriever
+    )
+
+    # 4. Final Answer Chain
+    qa_system_prompt = """You are an expert tutor. Use the following pieces of retrieved context \
+    to answer the question. If you don't know the answer, say that you don't know. \
+    Keep the answer concise.
+
+    Context:
+    {context}"""
+
+    qa_prompt = ChatPromptTemplate.from_messages([
+        ("system", qa_system_prompt),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ])
+
+    def format_docs(docs):
+        return "\n\n".join(doc.page_content for doc in docs)
+
+    # Full Chain Construction
+    rag_chain = (
+            {
+                "context": history_aware_retriever | format_docs,
+                "chat_history": lambda x: x["chat_history"],
+                "input": lambda x: x["input"]
+            }
+            | qa_prompt
+            | model
+            | StrOutputParser()
+    )
+
+    # 5. Invoke
+    answer = await rag_chain.ainvoke({
+        "input": user_query,
+        "chat_history": langchain_history
+    })
+
+    return answer

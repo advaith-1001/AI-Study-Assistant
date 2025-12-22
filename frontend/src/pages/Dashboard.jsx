@@ -35,9 +35,9 @@ const Dashboard = () => {
       {/* Header */}
       <nav className="bg-white shadow-md">
         <div className="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-800">AI Study Assistant</h1>
+          <h1 className="text-2xl font-bold text-gray-800">StudyFlow AI</h1>
           <div className="flex items-center gap-4">
-            <span className="text-gray-600">Welcome, {user?.username || user?.email}</span>
+            <span className="text-gray-600">{user?.username || user?.email}</span>
             <button
               onClick={handleLogout}
               className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition"

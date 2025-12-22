@@ -32,12 +32,6 @@ async def get_topic_summary(
         db: AsyncSession = Depends(get_session),
         user: User = Depends(fastapi_users.current_user()),
 ):
-    """
-    Generates a RAG summary for a specific topic.
-    - Verifies the user owns the pathway.
-    - Verifies embeddings are complete.
-    - Runs the RAG chain.
-    """
     # 1. Get the topic and its parent pathway
     query = (
         select(Topic)
@@ -54,15 +48,28 @@ async def get_topic_summary(
     if topic.pathway.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized.")
 
-    # 3. Check if embeddings are ready
+    # --- OPTIMIZATION START ---
+    # 3. Check if we already have a generated summary in the DB
+    if topic.summary:
+        # Return the existing summary instantly
+        return SummaryResponse(topic_id=topic_id, summary=topic.summary)
+    # --- OPTIMIZATION END ---
+
+    # 4. Check if embeddings are ready (only needed if we actually have to generate)
     if topic.pathway.embedding_status != EmbeddingStatus.COMPLETED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Embeddings are not ready. Current status: {topic.pathway.embedding_status.value}"
         )
 
-    # 4. Generate the summary (this calls your RAG service)
+    # 5. Generate the summary
     summary = await generate_summary_for_topic(topic)
+
+    # --- SAVE TO DB START ---
+    # 6. Store the newly generated summary so next time is instant
+    topic.summary = summary
+    await db.commit()
+    # --- SAVE TO DB END ---
 
     return SummaryResponse(topic_id=topic_id, summary=summary)
 

@@ -10,35 +10,50 @@ import CreatePathway from './pages/CreatePathway';
 import PathwayDetail from './pages/PathwayDetail';
 import TopicDetail from './pages/TopicDetail';
 import Quiz from './pages/Quiz';
+import Landing from './pages/Landing';
+import GoogleCallback from './pages/GoogleCallback';
 
 function App() {
-  const { setUser } = useAuthStore();
+ const setUser = useAuthStore((state) => state.setUser);
+  const setInitialCheckDone = useAuthStore((state) => state.setInitialCheckDone);
 
-  useEffect(() => {
-    // Check if user is already logged in
-    const checkAuth = async () => {
-      const token = localStorage.getItem('access_token');
-      if (token) {
-        try {
-          const user = await authAPI.getCurrentUser();
-          setUser(user);
-        } catch (err) {
-          console.error('Auth check failed:', err);
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('user');
-        }
+ const isChecking = React.useRef(false);
+
+ console.log("App Rendered. Current Path:", window.location.pathname);
+
+useEffect(() => {
+  let mounted = true;
+
+  const checkAuth = async () => {
+    try {
+      const user = await authAPI.getCurrentUser();
+      if (mounted && user) {
+        setUser(user);
       }
-    };
+    } catch (err) {
+      // ignore 401
+    } finally {
+      if (mounted) {
+        setInitialCheckDone(true);
+      }
+    }
+  };
 
-    checkAuth();
-  }, [setUser]);
+  checkAuth();
+
+  return () => {
+    mounted = false;
+  };
+}, []);
 
   return (
     <BrowserRouter>
       <Routes>
         {/* Public Routes */}
+        <Route path="/" element={<Landing />}  />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/auth/callback" element={<GoogleCallback />} />
 
         {/* Protected Routes */}
         <Route
@@ -83,7 +98,7 @@ function App() {
         />
 
         {/* Default Route */}
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );

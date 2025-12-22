@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { pathwayAPI } from '../services/apiClient';
 import usePathwayStore from '../store/pathwayStore';
+import ChatSidebar from '../components/ChatSidebar';
 
 const PathwayDetail = () => {
   const { pathwayId } = useParams();
@@ -9,6 +10,7 @@ const PathwayDetail = () => {
   const { currentPathway, setCurrentPathway, loading, setLoading, error, setError } = usePathwayStore();
   const [pathwayStatus, setPathwayStatus] = useState(null);
   const [statusLoading, setStatusLoading] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   useEffect(() => {
     fetchPathwayData();
@@ -77,6 +79,12 @@ const PathwayDetail = () => {
 
   return (
     <div className="min-h-screen bg-gray-100">
+      {isChatOpen && (
+        <div 
+          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 transition-opacity" 
+          onClick={() => setIsChatOpen(false)} 
+        />
+      )}
       {/* Header */}
       <nav className="bg-white shadow-md">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-4">
@@ -189,18 +197,34 @@ const PathwayDetail = () => {
 
         {/* Upload PDFs Section */}
         <div className="mt-8 bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-2xl font-bold mb-4">Study Materials</h2>
-          <p className="text-gray-600 mb-4">
-            Upload PDF files to generate summaries and quizzes for your topics.
-          </p>
-          <button
-            onClick={() => navigate(`/pathway/${pathwayId}/upload`)}
-            className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded-lg transition"
-          >
-            Upload PDFs
-          </button>
-        </div>
+  <h2 className="text-2xl font-bold mb-4">Study Materials</h2>
+  <p className="text-gray-600 mb-4">
+    Upload PDF files to generate summaries and quizzes for your topics.
+  </p>
+
+  {/* Flex container for buttons */}
+  <div className="flex gap-4">
+    <button
+      onClick={() => navigate(`/pathway/${pathwayId}/upload`)}
+      className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded-lg transition flex-1"
+    >
+      Upload PDFs
+    </button>
+    <button
+      onClick={() => setIsChatOpen(true)}
+      className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition flex justify-center items-center gap-3 shadow-lg shadow-blue-200 flex-1"
+    >
+      <span className="text-lg">💬</span> Chat with Path PDFs
+    </button>
+  </div>
+</div>
+
       </div>
+      <ChatSidebar 
+        pathwayId={pathwayId} 
+        isOpen={isChatOpen} 
+        onClose={() => setIsChatOpen(false)} 
+      />
     </div>
   );
 };

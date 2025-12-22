@@ -1,4 +1,5 @@
 import uuid
+from typing import Optional
 
 from fastapi_users import BaseUserManager, UUIDIDMixin
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
@@ -70,6 +71,17 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         except Exception as e:
             print(f"Failed to send verification email: {e}")
             # Handle email sending failure (e.g., log it)
+
+    async def on_after_oauth_registration(
+            self, user: User, oauth_account: dict, request: Optional[Request] = None
+    ):
+        # Google provides 'name' or 'given_name' in the oauth_account data
+        google_name = oauth_account.get("name")
+        if google_name:
+            # Update the user record with the real name from Google
+            user.username = google_name
+            await self.user_db.update(user)
+        print(f"User {user.id} registered with OAuth account {oauth_account['account_id']}")
 
     async def on_after_forgot_password(
             self, user: User, token: str, request: Request | None = None

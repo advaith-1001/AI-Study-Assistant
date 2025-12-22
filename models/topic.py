@@ -4,7 +4,7 @@ from typing import Optional, List
 
 from sqlalchemy import Enum as SQLEnum
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, Text, String, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from models.base import Base
 from models.enums import Status
@@ -20,5 +20,6 @@ class Topic(Base):
     completed: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # ✅ make nullable
     keywords: Mapped[List[str]] = mapped_column(JSON, nullable=True)
     pathway_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pathway.id"), nullable=False)
+    summary = Column(Text, nullable=True)
 
     pathway = relationship("Pathway", back_populates="topics")

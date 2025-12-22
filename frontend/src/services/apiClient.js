@@ -21,9 +21,14 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      // Only redirect if we're not already on login/register page
+      // and not doing the initial auth check
+      const currentPath = window.location.pathname;
+      if (currentPath !== '/login' && currentPath !== '/register' && currentPath !== '/') {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }
@@ -89,6 +94,16 @@ export const pathwayAPI = {
         keywords: [],
         status: 'PENDING',
       })),
+    });
+    return response.data;
+  },
+
+  chatWithPathway: async (pathwayId, message, history) => {
+    // history should be the array of past messages
+    // URL must match @router.post("/{pathway_id}/chat")
+    const response = await api.post(`/pathways/${pathwayId}/chat`, {
+      message: message,
+      history: history 
     });
     return response.data;
   },

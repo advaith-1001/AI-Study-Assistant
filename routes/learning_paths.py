@@ -21,6 +21,8 @@ from services.rag_service import process_and_embed_pdfs
 from schemas.topic_create import TopicResponse
 from services.quiz_service import generate_quiz
 from schemas.quiz_request import QuizRequest
+from schemas.chat_request import ChatRequest, ChatResponse
+from services.rag_service import chat_with_pathway_pdfs
 router = APIRouter(prefix="/pathways", tags=["Pathways"])
 
 @router.get("/", response_model=List[PathwayResponse])
@@ -197,6 +199,55 @@ async def quiz_generate(data: QuizRequest, db: AsyncSession = Depends(get_sessio
     quiz = await generate_quiz(topic, data.difficulty, data.num_questions)
     return quiz
 
+
+@router.post("/{pathway_id}/chat", response_model=ChatResponse)
+async def chat_pathway(
+        pathway_id: uuid.UUID,
+        data: ChatRequest,
+        user: User = Depends(fastapi_users.current_user()),
+        db: AsyncSession = Depends(get_session)
+):
+    """
+    Conversational RAG: Ask questions about pathway PDFs with chat history/memory.
+    """
+
+    # 1. Security Check: Verify pathway exists and belongs to the user
+    query = select(Pathway).where(Pathway.id == pathway_id, Pathway.user_id == user.id)
+    result = await db.execute(query)
+    pathway = result.scalar_one_or_none()
+
+    if not pathway:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pathway not found or access denied."
+        )
+
+    # 2. Status Check: Ensure PDFs are embedded and ready
+    if pathway.embedding_status != EmbeddingStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Study materials are still being processed. Please wait."
+        )
+
+    # 3. Call Service: Pass the message AND the history list
+    try:
+        answer = await chat_with_pathway_pdfs(
+            pathway_id=pathway_id,
+            user_query=data.message,
+            chat_history=data.history  # This is the List[ChatMessage] from your schema
+        )
+    except Exception as e:
+        # Log the error properly in a real app
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while generating the answer: {str(e)}"
+        )
+
+    # 4. Return Response
+    return ChatResponse(
+        answer=answer,
+        pathway_id=pathway_id
+    )
 
 
 

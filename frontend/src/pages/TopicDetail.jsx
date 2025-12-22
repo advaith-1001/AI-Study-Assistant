@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { topicAPI, pathwayAPI } from '../services/apiClient';
+import ReactMarkdown from 'react-markdown';
 
 const TopicDetail = () => {
   const { topicId } = useParams();
@@ -182,7 +183,8 @@ const TopicDetail = () => {
               <div className="bg-white rounded-lg shadow-md p-8">
                 <h3 className="text-2xl font-bold text-gray-800 mb-4">Summary</h3>
                 <div className="prose prose-sm max-w-none">
-                  <p className="text-gray-700 whitespace-pre-wrap">{summary}</p>
+                  {/* <p className="text-gray-700 whitespace-pre-wrap">{summary}</p> */}
+                  <ReactMarkdown>{summary}</ReactMarkdown>
                 </div>
               </div>
             )}
