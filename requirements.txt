@@ -1,36 +1,37 @@
 # --- Core Framework & Servers ---
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-gunicorn==21.2.0
-python-dotenv==1.0.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+gunicorn>=21.0.0
+python-dotenv>=1.0.0
 
-# --- Database ---
-sqlalchemy==2.0.23
-asyncpg>=0.30.0       # <--- CHANGE THIS (Allows 3.13 support)
-psycopg2-binary==2.9.9
+# --- Database (The Fix) ---
+sqlalchemy>=2.0.0
+asyncpg>=0.30.0
+psycopg2-binary>=2.9.0
 
 # --- RAG Ecosystem ---
-# Ensure these are modern to match the new asyncpg
-langchain==0.1.13
-langchain-core==0.1.30
-langchain-community==0.0.28
-langchain-google-genai==1.0.1
-langchain-huggingface==0.0.1
-langchain-postgres==0.0.9
-langchain-text-splitters==0.0.1
-pgvector==0.2.4
+langchain>=0.1.0
+langchain-core>=0.1.0
+langchain-community>=0.0.1
+langchain-google-genai>=1.0.0
+langchain-huggingface>=0.0.1
+langchain-postgres>=0.0.9
+langchain-text-splitters>=0.0.1
+pgvector>=0.2.0
 
-# --- THE FIX: Light-weight Torch for Free Tiers ---
+# --- ML & Embeddings (CPU Optimized for Free Tier) ---
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
-sentence-transformers==2.3.1
-google-generativeai==0.4.1
-huggingface-hub==0.20.3
+sentence-transformers>=2.3.0
+google-generativeai>=0.4.0
+huggingface-hub>=0.20.0
 numpy<2.0.0
 
-# --- PDF & Utils ---
-PyPDF2==3.0.1
-pydantic==2.5.2
-pydantic-settings==2.1.0
-python-multipart==0.0.7
-aiofiles==23.2.1
+# --- Security & Utils ---
+cryptography>=42.0.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-multipart>=0.0.7
+aiofiles>=23.0.0
+bcrypt>=4.1.0
+PyPDF2>=3.0.0
