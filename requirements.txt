@@ -25,7 +25,7 @@ torch
 sentence-transformers>=2.3.0
 google-generativeai>=0.4.0
 huggingface-hub>=0.20.0
-numpy<2.0.0
+numpy>=2.0.0
 
 # --- Security & Utils ---
 cryptography>=42.0.0
