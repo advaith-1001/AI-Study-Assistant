@@ -1,16 +1,15 @@
-# Core Framework
+# --- Core Framework & Servers ---
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 gunicorn==21.2.0
 python-dotenv==1.0.0
 
-# Database & ORM
+# --- Database ---
 sqlalchemy==2.0.23
-alembic==1.12.1
 asyncpg==0.29.0
 psycopg2-binary==2.9.9
 
-# Vector Database & RAG
+# --- RAG Ecosystem (Versions optimized for compatibility) ---
 langchain==0.1.13
 langchain-core==0.1.30
 langchain-community==0.0.28
@@ -20,21 +19,15 @@ langchain-postgres==0.0.9
 langchain-text-splitters==0.0.1
 pgvector==0.2.4
 
-# LLM & Embeddings
+# --- THE FIX: Light-weight Torch for Free Tiers ---
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+sentence-transformers==2.3.1
 google-generativeai==0.4.1
 huggingface-hub==0.20.3
-sentence-transformers==2.3.1
-torch==2.2.0 
-numpy==1.26.4
+numpy<2.0.0
 
-# Authentication & Security
-fastapi-users[sqlalchemy,oauth]==12.1.2
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-cryptography==42.0.2
-httpx==0.26.0
-
-# PDF & Utils
+# --- PDF & Utils ---
 PyPDF2==3.0.1
 pydantic==2.5.2
 pydantic-settings==2.1.0
