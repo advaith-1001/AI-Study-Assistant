@@ -104,6 +104,13 @@ const Login = () => {
               placeholder="••••••••"
               required
             />
+            <button
+              type="button"
+              onClick={() => navigate('/forgot-password')}
+              className="mt-2 text-sm text-blue-600 font-bold hover:underline"
+            >
+              Forgot Password?
+            </button>
           </div>
 
           <button

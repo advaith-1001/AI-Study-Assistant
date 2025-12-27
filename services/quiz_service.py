@@ -1,53 +1,69 @@
+import os
 import json
+import uuid
+import asyncio
+from typing import List, Tuple
+
+from dotenv import load_dotenv
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_postgres import PGVector
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_community.vectorstores import Chroma
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_community.embeddings import SentenceTransformerEmbeddings
-from dotenv import load_dotenv
-import os
 
 load_dotenv()
 
+# ---------------- CONFIG ----------------
 
-embedding_function = SentenceTransformerEmbeddings(
-    model_name="all-MiniLM-L6-v2"
+embedding_function = HuggingFaceEmbeddings(
+    model_name="all-MiniLM-L6-v2",
+    encode_kwargs={"normalize_embeddings": True}
 )
+
+SYNC_DB_URL = os.getenv("VECTOR_DB_URL")
 
 model = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
     google_api_key=os.getenv("API_KEY"),
 )
 
-CHROMA_DB_DIR = "./chroma_db"
 
+# ---------------------------------------------------------
+# QUIZ GENERATION SERVICE
+# ---------------------------------------------------------
 
 async def generate_quiz(topic, difficulty, num_questions):
     """
-    Uses Chroma RAG + Gemini to generate topic quizzes.
+    Uses PGVector RAG + Gemini to generate topic quizzes.
     """
-
-    # 1. Load vector DB collection
     collection_name = f"pathway_{topic.pathway_id}"
+    sync_url = SYNC_DB_URL
 
-    vector_store = Chroma(
-        collection_name=collection_name,
-        persist_directory=CHROMA_DB_DIR,
-        embedding_function=embedding_function
-    )
+    # --- THE SYNC THREAD BRIDGE ---
+    def get_context_sync():
+        try:
+            vector_store = PGVector(
+                collection_name=collection_name,
+                connection=sync_url,
+                embeddings=embedding_function,
+                use_jsonb=True,
+            )
 
-    retriever = vector_store.as_retriever(search_kwargs={"k": 4})
+            query = f"{topic.name} {' '.join(topic.keywords or [])}"
+            # Retrieve relevant chunks
+            docs = vector_store.similarity_search(query, k=4)
+            return "\n\n".join(d.page_content for d in docs)
+        except Exception as e:
+            print(f"❌ Quiz Context Sync Error: {e}")
+            return ""
 
-    # 2. Retrieve context
-    query = f"{topic.name} {' '.join(topic.keywords or [])}"
+    # 1. Run retrieval in thread to avoid async driver conflicts
+    retrieved_context = await asyncio.to_thread(get_context_sync)
 
-    def format_docs(docs):
-        return "\n\n".join(d.page_content for d in docs)
+    if not retrieved_context:
+        print("⚠️ Warning: No context retrieved for quiz generation.")
 
-    retrieved_context = format_docs(await retriever.ainvoke(query))
-
-    # 3. Build the quiz prompt
+    # 2. Build the quiz prompt
     QUIZ_PROMPT = """
     You are an expert AI tutor.
 
@@ -78,20 +94,18 @@ async def generate_quiz(topic, difficulty, num_questions):
     }}
     """
 
-    prompt_text = QUIZ_PROMPT.format(
-        context=retrieved_context,
-        topic_name=topic.name,
-        difficulty=difficulty,
-        num_questions=num_questions
-    )
+    prompt = ChatPromptTemplate.from_template(QUIZ_PROMPT)
+    rag_chain = prompt | model | StrOutputParser()
 
-    # 4. Send to Gemini
-    resp = await model.ainvoke(prompt_text)
+    # 3. Send to Gemini
+    content = await rag_chain.ainvoke({
+        "context": retrieved_context,
+        "topic_name": topic.name,
+        "difficulty": difficulty,
+        "num_questions": num_questions
+    })
 
-    # 5. Parse JSON automatically
-    content = resp.content
-
-    # Debugging: Print what the model actually returned
+    # 4. Parse JSON automatically
     print(f"DEBUG: Model Response:\n{content}")
 
     # Strip Markdown code blocks if present
@@ -104,45 +118,49 @@ async def generate_quiz(topic, difficulty, num_questions):
 async def chat_with_pdfs(topic, user_question: str):
     """
     Answers a user's question using only the uploaded PDFs
-    and returns answer with source references.
+    and returns answer with source references using PGVector.
     """
-
     collection_name = f"pathway_{topic.pathway_id}"
+    sync_url = SYNC_DB_URL
 
-    vector_store = Chroma(
-        collection_name=collection_name,
-        persist_directory=CHROMA_DB_DIR,
-        embedding_function=embedding_function
-    )
+    # --- THE SYNC THREAD BRIDGE ---
+    def get_docs_and_context_sync():
+        try:
+            vector_store = PGVector(
+                collection_name=collection_name,
+                connection=sync_url,
+                embeddings=embedding_function,
+                use_jsonb=True,
+            )
 
-    retriever = vector_store.as_retriever(search_kwargs={"k": 4})
+            # Retrieve relevant chunks
+            docs = vector_store.similarity_search(user_question, k=4)
 
-    # Retrieve relevant chunks
-    docs = await retriever.ainvoke(user_question)
+            context_blocks = []
+            sources = []
+            for i, doc in enumerate(docs):
+                context_blocks.append(f"[Source {i + 1}] {doc.page_content}")
+                sources.append({
+                    "source_id": i + 1,
+                    "page": doc.metadata.get("page"),
+                    "document": doc.metadata.get("source")
+                })
 
-    if not docs:
+            return "\n\n".join(context_blocks), sources
+        except Exception as e:
+            print(f"❌ Chat PDFs Sync Error: {e}")
+            return "", []
+
+    # 1. Run retrieval in thread
+    context_text, sources = await asyncio.to_thread(get_docs_and_context_sync)
+
+    if not context_text:
         return {
             "answer": "I could not find relevant information in your uploaded documents.",
             "sources": []
         }
 
-    # Format context + sources
-    context_blocks = []
-    sources = []
-
-    for i, doc in enumerate(docs):
-        context_blocks.append(
-            f"[Source {i+1}] {doc.page_content}"
-        )
-
-        sources.append({
-            "source_id": i + 1,
-            "page": doc.metadata.get("page"),
-            "document": doc.metadata.get("source")
-        })
-
-    context_text = "\n\n".join(context_blocks)
-
+    # 2. Build the chat prompt
     CHAT_PROMPT = """
     You are a helpful AI study assistant.
 
@@ -169,19 +187,20 @@ async def chat_with_pdfs(topic, user_question: str):
     }}
     """
 
-    prompt = CHAT_PROMPT.format(
-        context=context_text,
-        question=user_question
-    )
+    prompt = ChatPromptTemplate.from_template(CHAT_PROMPT)
+    rag_chain = prompt | model | StrOutputParser()
 
-    response = await model.ainvoke(prompt)
-    content = response.content
+    # 3. Generate response
+    response_content = await rag_chain.ainvoke({
+        "context": context_text,
+        "question": user_question
+    })
 
-    # Clean markdown if present
-    if "```" in content:
-        content = content.replace("```json", "").replace("```", "").strip()
+    # 4. Clean and parse JSON
+    if "```" in response_content:
+        response_content = response_content.replace("```json", "").replace("```", "").strip()
 
-    parsed = json.loads(content)
+    parsed = json.loads(response_content)
 
     return {
         "answer": parsed["answer"],

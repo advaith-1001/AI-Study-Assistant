@@ -1,5 +1,7 @@
 import uuid
+import os
 from typing import Optional
+from dotenv import load_dotenv
 
 from fastapi_users import BaseUserManager, UUIDIDMixin
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
@@ -9,12 +11,18 @@ from core.user_db import get_user_db
 from core.email import conf
 from models.user import User
 
-SECRET = "SUPER_SECRET_KEY"
+load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY environment variable is required")
 
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
-    reset_password_token_secret = SECRET
-    verification_token_secret = SECRET
+    reset_password_token_secret = SECRET_KEY
+    verification_token_secret = SECRET_KEY
 
     async def on_after_register(self, user: User, request: Request | None = None):
         """
@@ -41,10 +49,8 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         """
         print(f"Verification requested for user {user.id}. Token: {token}")
 
-        # This is the URL your Next.js frontend will use
-        # Your frontend will take the token and send it to your
-        # POST /auth/verify endpoint
-        verify_url = f"http://localhost:3000/auth/verify?token={token}"  # Change to your frontend URL
+        # Use environment variable for frontend URL
+        verify_url = f"{FRONTEND_URL}/auth/verify?token={token}"
 
         html_content = f"""
         <html>
@@ -88,11 +94,16 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     ):
         """
         This hook is called after a password-reset token is generated.
+        
+        IMPORTANT: This uses the deprecated /forgot-password endpoint.
+        For production, migrate to /request-password-reset with secure POST-based flow.
+        See routes/password_reset.py for secure implementation.
         """
         print(f"Password reset requested for user {user.id}. Token: {token}")
 
-        # This is the URL your Next.js frontend will use
-        reset_url = f"http://localhost:3000/auth/reset-password?token={token}"
+        # Use environment variable for frontend URL
+        # NOTE: This flow exposes token in URL - migrate to POST-based flow
+        reset_url = f"{FRONTEND_URL}/auth/reset-password?token={token}"
 
         html_content = f"""
         <html>
@@ -101,6 +112,9 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             <p>You requested a password reset. Click the link below to set a new password:</p>
             <a href="{reset_url}">Reset Your Password</a>
             <p>If you did not request this, please ignore this email.</p>
+            <hr>
+            <p><strong>IMPORTANT:</strong> For security, the new password reset flow will not include the token in the URL.</p>
+            <p>Instead, you will enter the password reset token in a form on the reset page.</p>
         </body>
         </html>
         """

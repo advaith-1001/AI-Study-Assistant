@@ -16,10 +16,12 @@ const Dashboard = () => {
   const fetchPathways = async () => {
     try {
       setLoading(true);
+      setError(null);
       const data = await pathwayAPI.getAllPathways();
       setPathways(data);
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to fetch pathways');
+      console.error('Fetch pathways error:', err);
     } finally {
       setLoading(false);
     }

@@ -7,18 +7,34 @@ import ChatSidebar from '../components/ChatSidebar';
 const PathwayDetail = () => {
   const { pathwayId } = useParams();
   const navigate = useNavigate();
-  const { currentPathway, setCurrentPathway, loading, setLoading, error, setError } = usePathwayStore();
-  const [pathwayStatus, setPathwayStatus] = useState(null);
+  const { 
+    currentPathway, 
+    setCurrentPathway, 
+    pathwayStatus,
+    setPathwayStatus,
+    loading, 
+    setLoading, 
+    error, 
+    setError,
+    getCachedStatus,
+    isCacheValid,
+  } = usePathwayStore();
   const [isChatOpen, setIsChatOpen] = useState(false);
 
+  // Fetch pathway data once on mount
   useEffect(() => {
     fetchPathwayData();
   }, [pathwayId]);
 
+  // Smart polling - only fetch if cache is expired
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchPathwayStatus();
-    }, 5000); // 5 seconds is plenty for "Sophisticated" apps to avoid server strain
+      // Only fetch if cache is invalid
+      if (!isCacheValid(pathwayId)) {
+        fetchPathwayStatus();
+      }
+    }, 5000); // Check every 5 seconds, but only fetch if needed
+    
     return () => clearInterval(interval);
   }, [pathwayId]);
 
@@ -26,12 +42,13 @@ const PathwayDetail = () => {
     try {
       setLoading(true);
       setError('');
-      const pathway = await pathwayAPI.getAllPathways();
-      const current = pathway.find((p) => p.id === pathwayId);
-      if (current) setCurrentPathway(current);
+      // ✅ NEW: Use optimized single pathway endpoint instead of fetching all
+      const pathway = await pathwayAPI.getPathwayById(pathwayId);
+      setCurrentPathway(pathway);
       await fetchPathwayStatus();
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to fetch pathway');
+      console.error('Fetch pathway error:', err);
     } finally {
       setLoading(false);
     }
@@ -40,7 +57,7 @@ const PathwayDetail = () => {
   const fetchPathwayStatus = async () => {
     try {
       const status = await pathwayAPI.getPathwayStatus(pathwayId);
-      setPathwayStatus(status);
+      setPathwayStatus(pathwayId, status);
     } catch (err) {
       console.error('Failed to fetch status:', err);
     }
@@ -157,12 +174,12 @@ const PathwayDetail = () => {
           
           <div className="flex items-center justify-between mb-8">
             <h2 className="text-2xl font-black text-slate-900 tracking-tight">Curriculum Structure</h2>
-            <button 
+            {/* <button 
                 onClick={() => navigate(`/pathway/${pathwayId}/upload`)}
                 className="text-xs font-black text-blue-600 hover:text-blue-700 uppercase tracking-widest px-4 py-2 bg-blue-50 rounded-lg transition-colors"
             >
                 + Add Materials
-            </button>
+            </button> */}
           </div>
 
           <div className="space-y-6">

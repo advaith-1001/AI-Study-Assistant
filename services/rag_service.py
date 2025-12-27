@@ -1,222 +1,216 @@
 import os
-import shutil
 import tempfile
 import uuid
+import asyncio
 from typing import List, Tuple
 
-import google.generativeai as genai
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from core.db import get_session, get_session_context  # We need a way to get a new session for background tasks
+from dotenv import load_dotenv
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+import traceback
+from core.db import get_session_context
 from models import Pathway, Topic
 from models.enums import Status
-from models.pathway import EmbeddingStatus  # Import your new enum
+from models.pathway import EmbeddingStatus
 
-# --- RAG Imports ---
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import SentenceTransformerEmbeddings
+from langchain_postgres import PGVector
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.prompts import MessagesPlaceholder
-from schemas.chat_request import ChatMessage
-from dotenv import load_dotenv
-import os
+from langchain_core.documents import Document
+import json
 
+from schemas.chat_request import ChatMessage
 
 load_dotenv()
 
-# Import your LLM, e.g., from langchain_openai or langchain_community.llms
-# from langchain_openai import ChatOpenAI
-# llm = ChatOpenAI(model="gpt-4o-mini")
-
-# --- Constants ---
-CHROMA_DB_DIR = "./chroma_db"
-# Initialize embedding model once and reuse
-embedding_function = SentenceTransformerEmbeddings(
-    model_name="all-MiniLM-L6-v2"
+embedding_function = HuggingFaceEmbeddings(
+    model_name="all-MiniLM-L6-v2",
+    # Ensure input is properly handled
+    encode_kwargs={"normalize_embeddings": True}
 )
 
+ASYNC_DB_URL = os.getenv("DATABASE_URL")
+SYNC_DB_URL = os.getenv("VECTOR_DB_URL")
+
+if not ASYNC_DB_URL or not SYNC_DB_URL:
+    raise ValueError("Both DATABASE_URL and VECTOR_DB_URL must be set")
 
 model = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",  # or "gemini-1.5-pro" depending on your access
-    google_api_key=os.getenv("API_KEY")
+    model="gemini-2.5-flash",
+    google_api_key=os.getenv("API_KEY"),
 )
 
-
-# --- Background Task for Embedding ---
 async def process_and_embed_pdfs(pathway_id: uuid.UUID, file_contents: List[Tuple[str, bytes]]):
-    """
-    This runs in the background. It loads PDFs, creates chunks,
-    and stores them in a unique Chroma collection for the pathway.
-    """
-    collection_name = f"pathway_{pathway_id}"
-    all_chunks = []
-
-    # Use a new async session for this background task
     async with get_session_context() as db:
         try:
+            all_chunks = []
             with tempfile.TemporaryDirectory() as temp_dir:
                 for filename, contents in file_contents:
                     file_path = os.path.join(temp_dir, filename)
                     with open(file_path, "wb") as f:
                         f.write(contents)
 
-                    # 1. Load PDF
                     loader = PyPDFLoader(file_path)
                     documents = loader.load()
 
-                    # 2. Split
                     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
                     chunks = text_splitter.split_documents(documents)
                     all_chunks.extend(chunks)
 
-            if not all_chunks:
-                raise ValueError("No text could be extracted from the provided PDFs.")
+            # --- 🔥 THE CRITICAL FIX: AGGRESSIVE TYPE ENFORCEMENT ---
+            sanitized_chunks = []
+            for chunk in all_chunks:
+                # Force content to string safely
+                content = chunk.page_content
 
-            # 3. Embed and Store
-            vector_store = Chroma.from_documents(
-                documents=all_chunks,
-                embedding=embedding_function,
-                collection_name=collection_name,
-                persist_directory=CHROMA_DB_DIR
-            )
-            vector_store.persist()
+                if content is None:
+                    continue
 
-            # 4. Update pathway status to COMPLETED
+                # Convert to string and remove null bytes/whitespace
+                clean_text = str(content).replace('\x00', '').strip()
+
+                # REJECT: Empty strings or tiny fragments (less than 10 chars)
+                if len(clean_text) < 10:
+                    continue
+
+                # Update the object and keep it
+                chunk.page_content = clean_text
+                sanitized_chunks.append(chunk)
+
+            print(f"🧼 TRACE: Sanitize complete. {len(all_chunks)} -> {len(sanitized_chunks)} chunks.")
+
+            if not sanitized_chunks:
+                raise ValueError("No valid text found in the PDFs.")
+
+            def sync_storage_logic():
+                print("📡 TRACE: Initializing Sync PGVector Handshake...")
+
+                # 1. Driver and URL Check
+                clean_url = SYNC_DB_URL.replace("postgresql+asyncpg", "postgresql")
+                print(f"🔗 DEBUG: Using Connection URL: {clean_url[:25]}... (Redacted)")
+
+                try:
+                    # 2. Pre-Check: Can we even talk to the DB?
+                    from sqlalchemy import create_engine, text as sa_text
+                    temp_engine = create_engine(clean_url)
+                    with temp_engine.connect() as conn:
+                        res = conn.execute(sa_text("SELECT 1")).fetchone()
+                        print(f"✅ DEBUG: Raw Sync Connection Test: {res}")
+
+                    # 3. High-Level Ingestion
+                    print(
+                        f"📦 DEBUG: Attempting to store {len(sanitized_chunks)} chunks in collection: pathway_{pathway_id}")
+
+
+                    vector_store = PGVector.from_documents(
+                        embedding=embedding_function,
+                        documents=sanitized_chunks,
+                        collection_name=f"pathway_{pathway_id}",
+                        connection=clean_url,
+                        use_jsonb=True,
+                    )
+
+                    # 4. Immediate Verification
+                    # Let's try to retrieve one thing to see if it exists
+                    print("🔍 DEBUG: Verifying storage with a quick similarity search...")
+                    test_search = vector_store.similarity_search("test", k=1)
+                    print(f"✅ DEBUG: Search returned {len(test_search)} results.")
+
+                    print(f"💎 TRACE: Sync Write Success. Data should be visible in Supabase.")
+                    return True
+                except Exception as e:
+                    print(f"🚨 PGVector INTERNAL ERROR: {type(e).__name__}: {str(e)}")
+                    traceback.print_exc()  # This is critical to see exactly where it fails
+                    raise e
+            await asyncio.to_thread(sync_storage_logic)
+
+            # Update Pathway Status
             pathway = await db.get(Pathway, pathway_id)
             if pathway:
                 pathway.embedding_status = EmbeddingStatus.COMPLETED
-                db.add(pathway)
                 await db.commit()
-            print(f"Successfully processed PDFs for pathway {pathway_id}")
+                print("🏁 TRACE: Pathway is now LIVE.")
 
         except Exception as e:
-            # 5. Handle Failure
-            print(f"Failed to process PDFs for pathway {pathway_id}: {e}")
+            print(f"🚨 CRITICAL RAG FAILURE: {str(e)}")
+            traceback.print_exc()
             pathway = await db.get(Pathway, pathway_id)
             if pathway:
                 pathway.embedding_status = EmbeddingStatus.FAILED
-                db.add(pathway)
                 await db.commit()
+# ---------------------------------------------------------
+# RAG SUMMARY GENERATION
+# ---------------------------------------------------------
+
+async_engine = create_async_engine(os.getenv("DATABASE_URL"))
 
 
-# --- RAG Function for Generating Content ---
 async def generate_summary_for_topic(topic: Topic) -> str:
-    """
-    Performs RAG to generate a summary for a specific topic.
-    """
     collection_name = f"pathway_{topic.pathway_id}"
-    collection_path = os.path.join(CHROMA_DB_DIR, "index")  # Chroma stores it in an 'index' subdir
+    print(f"🔍 TRACE: Generating summary for {topic.name}")
 
-    # Check if the vector store exists
-    try:
-        vector_store = Chroma(
-            collection_name=collection_name,
-            persist_directory=CHROMA_DB_DIR,
-            embedding_function=embedding_function
-        )
-        # Optional: check if collection has documents
-        if not vector_store._collection.count():
-            return "Error: No documents found in the vector store."
-    except Exception as e:
-        return f"Error loading vector store: {e}"
+    # Use the clean Sync URL (port 5432 or 6543, no asyncpg)
+    sync_url = SYNC_DB_URL
 
-    # 1. Load the existing vector store
-    vector_store = Chroma(
-        collection_name=collection_name,
-        persist_directory=CHROMA_DB_DIR,
-        embedding_function=embedding_function
-    )
+    # This inner function handles all the "Sync" work of PGVector
+    def get_context_sync():
+        try:
+            vector_store = PGVector(
+                collection_name=collection_name,
+                connection=sync_url,
+                embeddings=embedding_function,  # Ensure this is 'embeddings'
+                use_jsonb=True,
+            )
 
-    # 2. Create a retriever
-    retriever = vector_store.as_retriever(search_kwargs={"k": 4})  # Get top 4 chunks
+            search_query = f"{topic.name} {' '.join(topic.keywords or [])}"
+            # Use k=5 for better context
+            docs = vector_store.similarity_search(search_query, k=5)
+            return "\n\n".join(doc.page_content for doc in docs)
+        except Exception as e:
+            print(f"❌ Inner Sync Error: {e}")
+            return ""
 
-    # 3. Formulate the search query from the topic
-    search_query = f"{topic.name} {' '.join(topic.keywords or [])}"
+    # 1. Run the retrieval in a thread to avoid driver/async conflicts
+    context = await asyncio.to_thread(get_context_sync)
 
-    # 4. Define the RAG prompt
+    if not context:
+        return "Could not retrieve context from the study materials."
+
+    # 2. Now use the LLM to process the context (this part is safe to await)
     prompt_template = """
-    You are a study assistant. Produce a detailed, structured summary for the topic: "{topic_name}".
-
-    Write ONLY from the provided context. Do not use outside knowledge. If information is missing, state that explicitly.
-
-    Requirements:
-    - Length: 600–900 words.
-    - Structure: Use clear headings and subsections.
-    - Depth: Explain concepts, mechanisms, and relationships; include examples from the context.
-    - Precision: Quote or reference specific lines/sections from the context when supporting claims.
-    - Clarity: Avoid generic filler; prioritize technical accuracy and concrete details.
+    You are a study assistant. Use the context below to explain "{topic_name}".
 
     Context:
     {context}
-
-    Output format:
-    # {topic_name}: in-depth summary based on provided context
-
-    ## Overview
-    - Key idea and scope from the context.
-
-    ## Core concepts and mechanisms
-    - Definitions and how they connect.
-    - Processes/algorithms/workflows described.
-
-    ## Examples and evidence from the context
-    - Concrete examples or cases (quote short snippets where relevant).
-
-    ## Nuances, limitations, and edge cases
-    - Ambiguities, trade-offs, or assumptions mentioned.
-
-    ## Practical implications or applications
-    - How to use or apply the ideas as stated in the context.
-
-    ## Quick recap
-    - 5–7 bullet points capturing the most important takeaways from the context.
     """
+
     prompt = ChatPromptTemplate.from_template(prompt_template)
+    rag_chain = prompt | model | StrOutputParser()
 
-    # 5. Build the RAG chain
-    # This chain will:
-    # 1. Take the "topic_name"
-    # 2. Pass it to the retriever to get relevant docs
-    # 3. Format the docs into a "context" string
-    # 4. Plug "context" and "topic_name" into the prompt
-    # 5. Send the prompt to the LLM
-    # 6. Parse the output
-
-    def format_docs(docs):
-        return "\n\n---\n\n".join(doc.page_content for doc in docs)
-
-    rag_chain = (
-            {"context": retriever | format_docs, "topic_name": lambda x: x}
-            | prompt
-            | model  # Your LLM model
-            | StrOutputParser()
-    )
-
-    # 6. Run the chain
-    summary = await rag_chain.ainvoke(search_query)  # Use ainovke for async
-    return summary
+    return await rag_chain.ainvoke({
+        "context": context,
+        "topic_name": topic.name
+    })
 
 
-# services/rag_service.py
+# ---------------------------------------------------------
+# CHAT WITH PATHWAY PDFS
+# ---------------------------------------------------------
 
-async def chat_with_pathway_pdfs(pathway_id: uuid.UUID, user_query: str, chat_history: List[ChatMessage] = []) -> str:
+async def chat_with_pathway_pdfs(
+        pathway_id: uuid.UUID,
+        user_query: str,
+        chat_history: List[ChatMessage] = [],
+) -> str:
     collection_name = f"pathway_{pathway_id}"
+    sync_url = SYNC_DB_URL  # Ensure this is your clean sync URL
 
-    # 1. Load Vector Store
-    vector_store = Chroma(
-        collection_name=collection_name,
-        persist_directory=CHROMA_DB_DIR,
-        embedding_function=embedding_function
-    )
-    retriever = vector_store.as_retriever(search_kwargs={"k": 5})
-
-    # 2. Convert Pydantic history to LangChain message objects
-    # We only take the last 5-6 messages to stay within token limits
+    # 1. Convert our ChatMessage objects to LangChain Message objects
     langchain_history = []
     for msg in chat_history[-6:]:
         if msg.role == "user":
@@ -224,59 +218,59 @@ async def chat_with_pathway_pdfs(pathway_id: uuid.UUID, user_query: str, chat_hi
         else:
             langchain_history.append(AIMessage(content=msg.content))
 
-    # 3. Contextualize Question (The Re-phrasing Step)
-    contextualize_q_system_prompt = """Given a chat history and the latest user question \
-    which might reference context in the chat history, formulate a standalone question \
-    which can be understood without the chat history. Do NOT answer the question, \
-    just reformulate it if needed and otherwise return it as is."""
+    # --- THE SYNC THREAD BRIDGE ---
+    def get_context_and_standalone_query_sync():
+        try:
+            # Re-initialize the sync vector store
+            vector_store = PGVector(
+                collection_name=collection_name,
+                connection=sync_url,
+                embeddings=embedding_function,
+                use_jsonb=True,
+            )
 
-    contextualize_q_prompt = ChatPromptTemplate.from_messages([
-        ("system", contextualize_q_system_prompt),
-        MessagesPlaceholder("chat_history"),
-        ("human", "{input}"),
-    ])
+            # Step A: Contextualize the question (handle "it", "they", etc.)
+            # If history exists, ask the model to re-write the query
+            standalone_query = user_query
+            if langchain_history:
+                condense_prompt = ChatPromptTemplate.from_messages([
+                    ("system",
+                     "Given the chat history and a follow-up question, rephrase the follow-up to be a standalone question."),
+                    MessagesPlaceholder("chat_history"),
+                    ("human", "{input}")
+                ])
+                # We can run a small chain here or just use the model directly
+                chain = condense_prompt | model | StrOutputParser()
+                standalone_query = chain.invoke({"chat_history": langchain_history, "input": user_query})
 
-    # This sub-chain creates a search term that makes sense for the PDF
-    history_aware_retriever = (
-            contextualize_q_prompt
-            | model
-            | StrOutputParser()
-            | retriever
-    )
+            # Step B: Perform Similarity Search
+            docs = vector_store.similarity_search(standalone_query, k=5)
+            context = "\n\n".join(doc.page_content for doc in docs)
 
-    # 4. Final Answer Chain
-    qa_system_prompt = """You are an expert tutor. Use the following pieces of retrieved context \
-    to answer the question. If you don't know the answer, say that you don't know. \
-    Keep the answer concise.
+            return context, standalone_query
+        except Exception as e:
+            print(f"❌ Chat Sync Error: {e}")
+            return "", user_query
 
-    Context:
-    {context}"""
+    # 2. Run the DB/Context work in a thread
+    context, final_query = await asyncio.to_thread(get_context_and_standalone_query_sync)
 
+    if not context:
+        return "I'm sorry, I couldn't find any relevant information in the uploaded documents to answer that."
+
+    # --- FINAL GENERATION ---
+    # 3. Use the LLM to generate the final answer with the retrieved context
     qa_prompt = ChatPromptTemplate.from_messages([
-        ("system", qa_system_prompt),
+        ("system",
+         "You are a helpful study assistant. Answer the question ONLY using the provided context. If the answer isn't in the context, say you don't know.\n\nContext:\n{context}"),
         MessagesPlaceholder("chat_history"),
-        ("human", "{input}"),
+        ("human", "{input}")
     ])
 
-    def format_docs(docs):
-        return "\n\n".join(doc.page_content for doc in docs)
+    rag_chain = qa_prompt | model | StrOutputParser()
 
-    # Full Chain Construction
-    rag_chain = (
-            {
-                "context": history_aware_retriever | format_docs,
-                "chat_history": lambda x: x["chat_history"],
-                "input": lambda x: x["input"]
-            }
-            | qa_prompt
-            | model
-            | StrOutputParser()
-    )
-
-    # 5. Invoke
-    answer = await rag_chain.ainvoke({
-        "input": user_query,
-        "chat_history": langchain_history
+    return await rag_chain.ainvoke({
+        "context": context,
+        "chat_history": langchain_history,
+        "input": final_query
     })
-
-    return answer

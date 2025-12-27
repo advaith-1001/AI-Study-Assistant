@@ -40,6 +40,28 @@ async def get_user_pathways(
     pathways = result.scalars().all()
     return pathways
 
+@router.get("/{pathway_id}", response_model=PathwayResponse)
+async def get_pathway_by_id(
+    pathway_id: uuid.UUID,
+    user: User = Depends(fastapi_users.current_user()),
+    db: AsyncSession = Depends(get_session),
+):
+    """Get a single pathway by ID with all topics - optimized for single pathway views"""
+    query = (
+        select(Pathway)
+        .where(Pathway.id == pathway_id, Pathway.user_id == user.id)
+        .options(selectinload(Pathway.topics))
+    )
+    result = await db.execute(query)
+    pathway = result.scalar_one_or_none()
+    
+    if not pathway:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pathway not found or you do not have permission to view it."
+        )
+    return pathway
+
 @router.post("/", response_model=PathwayResponse)
 async def create_pathway(
     data: PathwayCreate,

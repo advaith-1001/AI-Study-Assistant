@@ -1,10 +1,17 @@
 # from sqlmodel import create_engine, Session, SQLModel
+import os
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from models.base import Base
 
-DATABASE_URL = "postgresql+asyncpg://postgres:security@localhost:5432/ai_study_assistant_db"
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is required")
+
 engine = create_async_engine(DATABASE_URL, echo=True)
 async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 

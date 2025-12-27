@@ -4,35 +4,111 @@ const API_URL = 'http://localhost:8000';
 
 const api = axios.create({
   baseURL: API_URL,
-  withCredentials: true, // Send cookies with requests
+  withCredentials: true, // Send HttpOnly cookies with requests (JWT stored in secure cookie)
 });
 
-// Add token to Authorization header if it exists
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-}, (error) => Promise.reject(error));
+// Token refresh state
+let isRefreshing = false;
+let failedQueue = [];
 
-// Handle response errors
+const processQueue = (error, token = null) => {
+  failedQueue.forEach(prom => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  
+  failedQueue = [];
+};
+
+// Response interceptor: Handle token expiration and refresh
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      // Only redirect if we're not already on login/register page
-      // and not doing the initial auth check
-      const currentPath = window.location.pathname;
-      if (currentPath !== '/login' && currentPath !== '/register' && currentPath !== '/') {
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('user');
-        window.location.href = '/login';
+  async (error) => {
+    const originalRequest = error.config;
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then(() => {
+            // After refresh completes, retry original request
+            return api(originalRequest);
+          })
+          .catch(err => Promise.reject(err));
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        // Try to refresh the token using the api instance with cookies
+        const response = await api.post('/auth/refresh-token', {});
+
+        // Update refresh timestamp
+        localStorage.setItem('refresh_timestamp', new Date().getTime().toString());
+
+        processQueue(null);
+        isRefreshing = false;
+
+        // Retry the original request
+        return api(originalRequest);
+      } catch (err) {
+        processQueue(err, null);
+        isRefreshing = false;
+
+        // Clear auth state before redirecting
+        const currentPath = window.location.pathname;
+        if (!['/login', '/register', '/'].includes(currentPath)) {
+          // Import authStore and clear user
+          import('../store/authStore.js').then(module => {
+            module.default.setState({ 
+              user: null, 
+              isAuthenticated: false,
+              isInitialCheckDone: true 
+            });
+          });
+          
+          localStorage.removeItem('user');
+          localStorage.removeItem('refresh_timestamp');
+          
+          // Redirect to login with session expired message
+          window.location.href = '/login?session_expired=true';
+        }
+
+        return Promise.reject(err);
       }
     }
+
     return Promise.reject(error);
   }
 );
+
+// Request interceptor: Check if token needs refresh before making request
+api.interceptors.request.use((config) => {
+  // Check if we should refresh token proactively
+  const lastRefresh = localStorage.getItem('refresh_timestamp');
+  if (lastRefresh) {
+    const timeSinceRefresh = (new Date().getTime() - parseInt(lastRefresh)) / 1000;
+    // If more than 12 minutes have passed since last refresh, refresh now (before 15 min expiry)
+    if (timeSinceRefresh > 720) {  // 720 seconds = 12 minutes (3 min buffer before 15 min expiry)
+      // Silently refresh token in background
+      api.post('/auth/refresh-token', {})
+        .then(() => {
+          localStorage.setItem('refresh_timestamp', new Date().getTime().toString());
+          console.log('[Auth] Token refreshed proactively');
+        })
+        .catch(err => {
+          console.error('[Auth] Silent token refresh failed:', err);
+          // Let the response interceptor handle the 401
+        });
+    }
+  }
+  return config;
+}, (error) => Promise.reject(error));
 
 export const authAPI = {
   register: async (email, password, username) => {
@@ -55,9 +131,9 @@ export const authAPI = {
       },
     });
     
-    if (response.data.access_token) {
-      localStorage.setItem('access_token', response.data.access_token);
-    }
+    // Token is now in HttpOnly cookie (secure, httpOnly set by backend)
+    // Track refresh time for preemptive refresh
+    localStorage.setItem('refresh_timestamp', new Date().getTime().toString());
     
     return response.data;
   },
@@ -68,8 +144,9 @@ export const authAPI = {
     } catch (error) {
       console.error('Logout error:', error);
     }
-    localStorage.removeItem('access_token');
+    // Clear local user data (backend clears HttpOnly cookie)
     localStorage.removeItem('user');
+    localStorage.removeItem('refresh_timestamp');
   },
 
   getCurrentUser: async () => {
@@ -77,11 +154,49 @@ export const authAPI = {
     localStorage.setItem('user', JSON.stringify(response.data));
     return response.data;
   },
+
+  verifyToken: async () => {
+    const response = await api.post('/auth/verify-token');
+    return response.data;
+  },
+
+  refreshToken: async () => {
+    const response = await api.post('/auth/refresh-token');
+    localStorage.setItem('refresh_timestamp', new Date().getTime().toString());
+    return response.data;
+  },
+
+  requestPasswordReset: async (email) => {
+    const response = await api.post('/auth/request-password-reset', {
+      email,
+    });
+    return response.data;
+  },
+
+  verifyResetToken: async (token) => {
+    const response = await api.post('/auth/verify-reset-token', {
+      token,
+    });
+    return response.data;
+  },
+
+  resetPassword: async (token, newPassword) => {
+    const response = await api.post('/auth/reset-password', {
+      token,
+      new_password: newPassword,
+    });
+    return response.data;
+  },
 };
 
 export const pathwayAPI = {
   getAllPathways: async () => {
     const response = await api.get('/pathways/');
+    return response.data;
+  },
+
+  getPathwayById: async (pathwayId) => {
+    const response = await api.get(`/pathways/${pathwayId}`);
     return response.data;
   },
 
@@ -136,11 +251,6 @@ export const pathwayAPI = {
 
   getPathwayStatus: async (pathwayId) => {
     const response = await api.get(`/pathways/${pathwayId}/status`);
-    return response.data;
-  },
-
-  getPathwayById: async (pathwayId) => {
-    const response = await api.get(`/pathways/${pathwayId}`);
     return response.data;
   },
 };
