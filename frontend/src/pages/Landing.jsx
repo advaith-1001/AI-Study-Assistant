@@ -46,7 +46,7 @@ const Landing = () => {
           >
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-full shadow-sm mb-8">
               <Sparkles className="w-3 h-3 text-blue-600" />
-              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-600">Powered by Gemini 1.5 Pro</span>
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-600">Powered by Gemini 2.5 Pro</span>
             </div>
             
             <h1 className="text-6xl md:text-8xl font-black tracking-tight leading-[0.9] mb-10 text-slate-900">
