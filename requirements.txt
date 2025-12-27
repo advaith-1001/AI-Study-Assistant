@@ -6,10 +6,11 @@ python-dotenv==1.0.0
 
 # --- Database ---
 sqlalchemy==2.0.23
-asyncpg==0.29.0
+asyncpg>=0.30.0       # <--- CHANGE THIS (Allows 3.13 support)
 psycopg2-binary==2.9.9
 
 # --- RAG Ecosystem ---
+# Ensure these are modern to match the new asyncpg
 langchain==0.1.13
 langchain-core==0.1.30
 langchain-community==0.0.28
@@ -19,7 +20,7 @@ langchain-postgres==0.0.9
 langchain-text-splitters==0.0.1
 pgvector==0.2.4
 
-# --- ML & Embeddings (CPU Optimized) ---
+# --- THE FIX: Light-weight Torch for Free Tiers ---
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
 sentence-transformers==2.3.1
@@ -27,14 +28,9 @@ google-generativeai==0.4.1
 huggingface-hub==0.20.3
 numpy<2.0.0
 
-# --- The Fix for the "Maturin" Error ---
-# Forcing stable versions that have pre-compiled wheels
-cryptography==42.0.5
-pydantic==2.5.2
-pydantic-settings==2.1.0
-
 # --- PDF & Utils ---
 PyPDF2==3.0.1
+pydantic==2.5.2
+pydantic-settings==2.1.0
 python-multipart==0.0.7
 aiofiles==23.2.1
-bcrypt==4.1.2
