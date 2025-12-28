@@ -89,20 +89,28 @@ api.interceptors.response.use(
 
 // Request interceptor: Check if token needs refresh before making request
 api.interceptors.request.use((config) => {
-  // Check if we should refresh token proactively
+  // Only attempt proactive refresh if:
+  // 1. User is authenticated (has refresh_timestamp)
+  // 2. We're not already refreshing
+  // 3. Enough time has passed since last refresh
   const lastRefresh = localStorage.getItem('refresh_timestamp');
-  if (lastRefresh) {
+  if (lastRefresh && !isRefreshing) {
     const timeSinceRefresh = (new Date().getTime() - parseInt(lastRefresh)) / 1000;
     // If more than 12 minutes have passed since last refresh, refresh now (before 15 min expiry)
     if (timeSinceRefresh > 720) {  // 720 seconds = 12 minutes (3 min buffer before 15 min expiry)
+      // Mark as refreshing to prevent multiple simultaneous refresh attempts
+      isRefreshing = true;
+      
       // Silently refresh token in background
       api.post('/auth/refresh-token', {})
         .then(() => {
           localStorage.setItem('refresh_timestamp', new Date().getTime().toString());
           console.log('[Auth] Token refreshed proactively');
+          isRefreshing = false;
         })
         .catch(err => {
           console.error('[Auth] Silent token refresh failed:', err);
+          isRefreshing = false;
           // Let the response interceptor handle the 401
         });
     }

@@ -3,17 +3,14 @@ import tempfile
 import uuid
 import asyncio
 from typing import List, Tuple
-
+import time
 from dotenv import load_dotenv
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 import traceback
 from core.db import get_session_context
 from models import Pathway, Topic
-from models.enums import Status
 from models.pathway import EmbeddingStatus
 
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_postgres import PGVector
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -21,17 +18,15 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.documents import Document
-import json
+from langchain_huggingface import HuggingFaceEndpointEmbeddings
 
 from schemas.chat_request import ChatMessage
 
 load_dotenv()
 
-embedding_function = HuggingFaceEmbeddings(
-    model_name="all-MiniLM-L6-v2",
-    # Ensure input is properly handled
-    encode_kwargs={"normalize_embeddings": True}
+embedding_function = HuggingFaceEndpointEmbeddings(
+    model="sentence-transformers/all-MiniLM-L6-v2",
+    huggingfacehub_api_token=os.getenv("HF_TOKEN")
 )
 
 ASYNC_DB_URL = os.getenv("DATABASE_URL")
@@ -89,44 +84,34 @@ async def process_and_embed_pdfs(pathway_id: uuid.UUID, file_contents: List[Tupl
 
             def sync_storage_logic():
                 print("📡 TRACE: Initializing Sync PGVector Handshake...")
-
-                # 1. Driver and URL Check
                 clean_url = SYNC_DB_URL.replace("postgresql+asyncpg", "postgresql")
-                print(f"🔗 DEBUG: Using Connection URL: {clean_url[:25]}... (Redacted)")
 
                 try:
-                    # 2. Pre-Check: Can we even talk to the DB?
-                    from sqlalchemy import create_engine, text as sa_text
-                    temp_engine = create_engine(clean_url)
-                    with temp_engine.connect() as conn:
-                        res = conn.execute(sa_text("SELECT 1")).fetchone()
-                        print(f"✅ DEBUG: Raw Sync Connection Test: {res}")
-
-                    # 3. High-Level Ingestion
-                    print(
-                        f"📦 DEBUG: Attempting to store {len(sanitized_chunks)} chunks in collection: pathway_{pathway_id}")
-
-
-                    vector_store = PGVector.from_documents(
-                        embedding=embedding_function,
-                        documents=sanitized_chunks,
+                    # 1. Initialize the VectorStore (without adding docs yet)
+                    vector_store = PGVector(
+                        embeddings=embedding_function,
                         collection_name=f"pathway_{pathway_id}",
                         connection=clean_url,
                         use_jsonb=True,
                     )
 
-                    # 4. Immediate Verification
-                    # Let's try to retrieve one thing to see if it exists
-                    print("🔍 DEBUG: Verifying storage with a quick similarity search...")
-                    test_search = vector_store.similarity_search("test", k=1)
-                    print(f"✅ DEBUG: Search returned {len(test_search)} results.")
+                    # 2. Add documents in batches to avoid 429 errors
+                    batch_size = 50  # Stay well under the 1500 RPM limit
+                    for i in range(0, len(sanitized_chunks), batch_size):
+                        batch = sanitized_chunks[i: i + batch_size]
+                        print(f"📦 DEBUG: Embedding batch {i // batch_size + 1}...")
 
-                    print(f"💎 TRACE: Sync Write Success. Data should be visible in Supabase.")
+                        vector_store.add_documents(batch)
+
+                        # 3. Small sleep to let the Google API quota "breathe"
+                        time.sleep(1)
+
+                    print(f"✅ TRACE: Successfully stored {len(sanitized_chunks)} chunks.")
                     return True
                 except Exception as e:
                     print(f"🚨 PGVector INTERNAL ERROR: {type(e).__name__}: {str(e)}")
-                    traceback.print_exc()  # This is critical to see exactly where it fails
                     raise e
+
             await asyncio.to_thread(sync_storage_logic)
 
             # Update Pathway Status

@@ -1,24 +1,22 @@
 import os
 import json
-import uuid
 import asyncio
-from typing import List, Tuple
 
 from dotenv import load_dotenv
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_postgres import PGVector
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
-
+from langchain_huggingface import HuggingFaceEndpointEmbeddings
 load_dotenv()
 
 # ---------------- CONFIG ----------------
 
-embedding_function = HuggingFaceEmbeddings(
-    model_name="all-MiniLM-L6-v2",
-    encode_kwargs={"normalize_embeddings": True}
+embedding_function = HuggingFaceEndpointEmbeddings(
+    model="sentence-transformers/all-MiniLM-L6-v2",
+    huggingfacehub_api_token=os.getenv("HF_TOKEN")
 )
+
 
 SYNC_DB_URL = os.getenv("VECTOR_DB_URL")
 
