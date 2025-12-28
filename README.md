@@ -1,6 +1,10 @@
-# AI Study Assistant - Full Stack Application
+# StudyFlow AI - A powerful RAG based AI Study Assistant
 
 A complete AI-powered learning platform built with FastAPI backend and React frontend. The application enables users to create learning pathways, upload study materials (PDFs), generate AI-powered summaries and quizzes.
+
+## 🚀 Live Demo
+Experience the platform live here:  
+**[https://studyflow-app.vercel.app](https://studyflow-nasiw5ga9-advaiths-projects-7202fc2e.vercel.app/)**
 
 ## Features
 
