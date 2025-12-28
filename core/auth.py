@@ -26,8 +26,8 @@ cookie_transport = CookieTransport(
     cookie_name="auth",
     cookie_max_age=REFRESH_TOKEN_LIFETIME,  # Use refresh token lifetime for cookie
     cookie_httponly=True,
-    cookie_secure=False,  # Set to True in production with HTTPS
-    cookie_samesite="lax",  # Protect against CSRF
+    cookie_secure=True, 
+    cookie_samesite="none",
 )
 
 def get_jwt_strategy():
